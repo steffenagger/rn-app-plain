@@ -11,77 +11,70 @@ type NavigationProps = StackScreenProps<NavigationStackParamList, 'List'>;
 type Props = NavigationProps;
 
 type State = {
-  collection: Realm.Results<RealmItem>;
   items: Array<RealmItem>;
 };
 
 export default class ListScreen extends React.PureComponent<Props, State> {
+  #collection: Realm.Collection<RealmItem>;
+
   constructor(props: Props) {
     super(props);
 
-    const collection = realm.objects(RealmItem).sorted('text');
+    this.#collection = realm.objects(RealmItem).sorted('text');
 
     this.state = {
-      collection,
-      items: [...collection],
+      items: [...this.#collection],
     };
-    collection.addListener(this.onCollectionChange);
+    this.#collection.addListener(this.onCollectionChange);
   }
 
   componentWillUnmount() {
-    this.state.collection.removeListener(this.onCollectionChange);
+    this.#collection.removeListener(this.onCollectionChange);
   }
 
   private onCollectionChange = (
     collection: Realm.Collection<RealmItem>,
     changes: Realm.CollectionChangeSet,
   ) => {
-    if (
-      !changes.insertions.length &&
-      !changes.deletions.length &&
-      !changes.newModifications.length &&
-      !changes.oldModifications.length
-    ) {
-      return;
+    try {
+      if (
+        !changes.insertions.length &&
+        !changes.deletions.length &&
+        !changes.newModifications.length
+      ) {
+        return;
+      }
+
+      // If simply running this.setState({items: [...collection]}), ALL items re-renders
+      // (FlatList will fix some performance issues, as it limits the amount of renders to the viewable area)
+
+      // So we need to do this:
+      const items = [...this.state.items];
+
+      for (let i = changes.deletions.length - 1; i >= 0; i--) {
+        const index = changes.deletions[i];
+        items.splice(index, 1);
+      }
+
+      for (let i = changes.insertions.length - 1; i >= 0; i--) {
+        const index = changes.insertions[i];
+        items.splice(index, 0, collection[index]);
+      }
+
+      for (let i = changes.newModifications.length - 1; i >= 0; i--) {
+        const index = changes.newModifications[i];
+        items[index] = collection[index];
+      }
+
+      this.setState({items});
+    } catch (err) {
+      console.error(err);
     }
-
-    // Check references for shallow equality
-    console.log('collection is same ref', collection === this.state.collection);
-
-    for (let i = 0; i <= 10; i++) {
-      console.log(
-        collection[i].text + ' is the same ref',
-        this.state.items[i] === collection[i],
-      );
-    }
-
-    // If running this, ALL items re-renders
-    // this.setState({items: [...collection]});
-    // (FlatList will fix some performance issues, as it limits the amount of renders to the viewable area)
-
-    // So we need to do this:
-    const items = [...this.state.items];
-
-    for (let i = changes.deletions.length - 1; i >= 0; i--) {
-      const index = changes.deletions[i];
-      items.splice(index, 1);
-    }
-
-    for (let i = changes.insertions.length - 1; i >= 0; i--) {
-      const index = changes.insertions[i];
-      items.splice(index, 0, collection[index]);
-    }
-
-    for (let i = changes.newModifications.length - 1; i >= 0; i--) {
-      const index = changes.newModifications[i];
-      items[index] = collection[index];
-    }
-
-    this.setState({items});
   };
 
   private keyExtractor = (item: RealmItem) =>
     `realm-item-${item._id.toHexString()}`;
+
   private renderItem = ({item}: {item: RealmItem}) => (
     <ListItem item={item} navigation={this.props.navigation} />
   );
